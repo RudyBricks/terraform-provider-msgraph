@@ -805,26 +805,35 @@ func relationshipRefObjectID(body types.Dynamic) string {
 	return utils.LastSegment(odataID)
 }
 
+// addNullProperty seeds propertyPath in root with a null leaf, expanding a
+// dotted path such as "web.redirectUris" into nested objects.
+//
+// When a property and one of its children are both requested, the more specific
+// path wins regardless of the order they were given in, so that
+// "web,web.redirectUris" and "web.redirectUris,web" seed the same body.
 func addNullProperty(root map[string]interface{}, propertyPath string) {
 	parts := strings.Split(propertyPath, ".")
-	current := root
-	for i, part := range parts {
+
+	// Validate up front so a malformed path leaves no partially built objects.
+	for _, part := range parts {
 		if part == "" {
 			return
 		}
+	}
+
+	current := root
+	for i, part := range parts {
 		if i == len(parts)-1 {
+			// A nested path already claimed this property; keep the more
+			// specific value rather than flattening it back to null.
+			if _, isObject := current[part].(map[string]interface{}); isObject {
+				return
+			}
 			current[part] = nil
 			return
 		}
-		next, ok := current[part]
-		if !ok {
-			child := make(map[string]interface{})
-			current[part] = child
-			current = child
-			continue
-		}
-		child, ok := next.(map[string]interface{})
-		if !ok {
+		child, isObject := current[part].(map[string]interface{})
+		if !isObject {
 			child = make(map[string]interface{})
 			current[part] = child
 		}

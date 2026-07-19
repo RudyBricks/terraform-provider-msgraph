@@ -26,7 +26,21 @@ If you import a resource without specifying properties:
 terraform import msgraph_resource.group /groups/00000000-0000-0000-0000-000000000000
 ```
 
-The resource will be imported with an empty `body`, causing Terraform to detect drift and want to remove all properties on the next plan.
+The resource is imported with a null `body`. Terraform then sees every property in your configuration as absent from state and plans an in-place update, sending a redundant `PATCH` that rewrites properties which already hold the right values:
+
+```text
+  # msgraph_resource.group will be updated in-place
+  # (imported from "/groups/00000000-0000-0000-0000-000000000000")
+  ~ resource "msgraph_resource" "group" {
+      + body = {
+          + displayName     = "My Group"
+          + mailEnabled     = false
+        }
+      ~ output = {} -> (known after apply)
+    }
+
+Plan: 1 to import, 0 to add, 1 to change, 0 to destroy.
+```
 
 ### The Solution: `importProperties`
 
@@ -184,6 +198,27 @@ resource "msgraph_resource" "app" {
   }
 }
 ```
+
+#### Overlapping Property Paths
+
+If a property and one of its children are both listed, the more specific path wins, whichever order you write them in. These two are equivalent:
+
+```bash
+importProperties=web,web.redirectUris
+importProperties=web.redirectUris,web
+```
+
+Both seed `body` as `{ web = { redirectUris = ... } }`, so Terraform manages `redirectUris` alone and leaves the other fields of `web` untouched.
+
+To manage the whole `web` object instead, list only the parent:
+
+```bash
+importProperties=displayName,web
+```
+
+Seeding a property that holds an object pulls in every field the API returns for it, so `body` will contain the complete `web` object after the first read. Bear in mind that your configuration then has to account for all of those fields.
+
+Paths containing empty segments — `web..redirectUris`, `web.`, `.web` — are ignored. The remaining properties are still seeded, so a typo silently narrows what gets imported rather than failing the import; check the resulting `body` if a property you expected is missing.
 
 ### Importing with Different API Versions
 
